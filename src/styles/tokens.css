@@ -1,0 +1,36 @@
+:root {
+    --font-main: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+
+    /* Surfaces & Backgrounds */
+    --bg-app: #0c0e14;
+    --bg-card: #151824;
+    --bg-card-hover: #1c2132;
+    --bg-elevated: #22283c;
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    /* Tactical Color Palette */
+    --color-primary: #4f8cff;
+    --color-primary-glow: rgba(79, 140, 255, 0.35);
+    --color-success: #10b981;
+    --color-danger: #f43f5e;
+    --color-warning: #f59e0b;
+    --color-accent: #a855f7;
+
+    /* Text Hierarchy */
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+
+    /* Sizing & Safe Areas */
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+    --radius-full: 9999px;
+
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+}
