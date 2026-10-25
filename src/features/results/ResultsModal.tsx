@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Clock } from 'lucide-react';
 import { RoundResult } from '../../types/gameTypes';
 
 interface ResultsModalProps {
@@ -8,9 +9,13 @@ interface ResultsModalProps {
     onHome: () => void;
     /** Should show a rewarded ad and resolve to true only if the player earned the reward */
     onWatchAdRevive?: () => Promise<boolean>;
-    /** False once the player has already revived this round */
+    /** Called when the passive cooldown timer finishes and grants a free life/replay */
+    onCooldownComplete?: () => void;
+    /** False once the player has already revived mid-round */
     canRevive?: boolean;
-    /** Untangle rounds report hints used in the third stat. */
+    /** Cooldown in seconds before a life regenerates if the player doesn't watch an ad (default 120s) */
+    cooldownSeconds?: number;
+    /** Untangle rounds can optionally still show Hints, or unified Mistakes */
     isUntangle?: boolean;
 }
 
@@ -20,15 +25,40 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
     onReplay,
     onHome,
     onWatchAdRevive,
+    onCooldownComplete,
     canRevive = true,
-    isUntangle = false,
+    cooldownSeconds = 120,
 }) => {
     const [adLoading, setAdLoading] = useState(false);
     const [adError, setAdError] = useState<string | null>(null);
+    const [waitLeft, setWaitLeft] = useState(cooldownSeconds);
+
+    // Reset & tick the cooldown timer whenever the modal opens on a failed round
+    useEffect(() => {
+        if (!result || result.cleared) return;
+        setWaitLeft(cooldownSeconds);
+        setAdError(null);
+
+        if (cooldownSeconds <= 0) return;
+
+        const id = window.setInterval(() => {
+            setWaitLeft((prev) => {
+                if (prev <= 1) {
+                    window.clearInterval(id);
+                    onCooldownComplete?.();
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => window.clearInterval(id);
+    }, [result, cooldownSeconds, onCooldownComplete]);
 
     if (!result) return null;
 
     const showRevive = !result.cleared && canRevive && !!onWatchAdRevive;
+    const isCoolingDown = !result.cleared && waitLeft > 0;
 
     const handleRevive = async () => {
         if (!onWatchAdRevive || adLoading) return;
@@ -36,7 +66,11 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
         setAdError(null);
         try {
             const rewarded = await onWatchAdRevive();
-            if (!rewarded) setAdError('Watch the full ad to revive.');
+            if (!rewarded) {
+                setAdError('Watch the full ad to restore your life.');
+            } else {
+                setWaitLeft(0);
+            }
         } catch {
             setAdError('Ad not available right now. Try again in a moment.');
         } finally {
@@ -52,6 +86,9 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
         }
         return `${secs}s`;
     };
+
+    const waitMm = Math.floor(waitLeft / 60);
+    const waitSs = String(waitLeft % 60).padStart(2, '0');
 
     return (
         <div
@@ -82,7 +119,6 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                     textAlign: 'center',
                 }}
             >
-
                 {/* Star Rating Display (only when cleared) */}
                 {result.cleared && (
                     <div
@@ -111,6 +147,37 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                     </div>
                 )}
 
+                {/* Broken Heart Pips (when out of lives) */}
+                {!result.cleared && (
+                    <div
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            marginBottom: '12px',
+                            backgroundColor: '#FFFFFF',
+                            border: '1px solid #E5E2D9',
+                            borderRadius: '9999px',
+                            padding: '8px 16px',
+                            boxShadow: '0 2px 6px rgba(0, 0, 0, 0.03)',
+                        }}
+                    >
+                        {Array.from({ length: 3 }, (_, i) => (
+                            <span
+                                key={i}
+                                style={{
+                                    display: 'inline-block',
+                                    width: '12px',
+                                    height: '12px',
+                                    borderRadius: '50%',
+                                    backgroundColor: !isCoolingDown && i === 0 ? '#E5484D' : '#D4D0C5',
+                                    transition: 'background-color 0.25s ease',
+                                }}
+                            />
+                        ))}
+                    </div>
+                )}
+
                 {/* Title */}
                 <h1
                     style={{
@@ -121,20 +188,50 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                         margin: '0 0 6px 0',
                     }}
                 >
-                    {result.cleared ? 'Level Complete!' : 'Out of Lives!'}
+                    {result.cleared
+                        ? 'Level Complete!'
+                        : isCoolingDown
+                            ? 'Out of Lives!'
+                            : 'Life Restored!'}
                 </h1>
+
                 {!result.cleared && (
                     <div
                         style={{
                             fontSize: '0.95rem',
                             color: '#5A606A',
-                            marginBottom: '18px',
+                            marginBottom: '14px',
                             lineHeight: 1.4,
                         }}
                     >
-                        {showRevive
-                            ? 'Watch a short ad to get a life back and keep your progress.'
-                            : 'Give it another try, you can do it!'}
+                        {isCoolingDown
+                            ? showRevive
+                                ? 'Watch a short ad to revive right where you left off, or wait for a life to recharge.'
+                                : 'Wait for your life to recharge to try again.'
+                            : 'Your life has recharged! Ready to jump back in?'}
+                    </div>
+                )}
+
+                {/* Live Cooldown Pill (when out of lives) */}
+                {!result.cleared && isCoolingDown && (
+                    <div
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            backgroundColor: '#EAE6DD',
+                            color: '#181B20',
+                            padding: '6px 14px',
+                            borderRadius: '9999px',
+                            fontSize: '0.88rem',
+                            fontWeight: 700,
+                            marginBottom: '18px',
+                        }}
+                    >
+                        <Clock size={15} strokeWidth={2.2} />
+                        <span>
+                            Next life in {waitMm}:{waitSs}
+                        </span>
                     </div>
                 )}
 
@@ -192,10 +289,11 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
 
                     <div style={{ width: '1px', height: '36px', backgroundColor: '#ECE9E0' }} />
 
-                    {/* Mistakes Column */}
+                    {/* Mistakes Column (Unified across both modes) */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <span style={{ fontSize: '0.82rem', fontWeight: 500, color: '#5A606A' }}>
-                            {isUntangle ? 'Hints:' : 'Mistakes:'}                        </span>
+                            Mistakes:
+                        </span>
                         <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#181B20' }}>
                             {result.mistakes}
                         </span>
@@ -235,19 +333,26 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                                     gap: '10px',
                                     transition: 'transform 0.1s ease',
                                 }}
-                                onPointerDown={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
+                                onPointerDown={(e) =>
+                                    (e.currentTarget.style.transform = 'scale(0.98)')
+                                }
                                 onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                                onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                                onPointerLeave={(e) =>
+                                    (e.currentTarget.style.transform = 'scale(1)')
+                                }
                             >
                                 <span style={{ fontSize: '1.3rem' }}>❤️</span>
                                 {adLoading ? 'Loading ad…' : 'Watch Ad to Revive (+1 life)'}
                             </button>
 
                             {adError && (
-                                <div style={{ fontSize: '0.85rem', color: '#B91C1C' }}>{adError}</div>
+                                <div style={{ fontSize: '0.85rem', color: '#B91C1C' }}>
+                                    {adError}
+                                </div>
                             )}
                         </>
                     )}
+
                     {result.cleared && (
                         <button
                             onClick={onNextLevel}
@@ -267,12 +372,8 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                             onPointerDown={(e) =>
                                 (e.currentTarget.style.transform = 'scale(0.98)')
                             }
-                            onPointerUp={(e) =>
-                                (e.currentTarget.style.transform = 'scale(1)')
-                            }
-                            onPointerLeave={(e) =>
-                                (e.currentTarget.style.transform = 'scale(1)')
-                            }
+                            onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                            onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
                         >
                             Next Level
                         </button>
@@ -280,32 +381,35 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
 
                     <button
                         onClick={onReplay}
+                        disabled={isCoolingDown}
                         style={{
                             width: '100%',
                             height: '54px',
-                            backgroundColor: result.cleared || showRevive ? '#FFFFFF' : '#3B6AD9',
+                            backgroundColor:
+                                result.cleared || showRevive ? '#FFFFFF' : '#3B6AD9',
                             color: result.cleared || showRevive ? '#181B20' : '#FFFFFF',
                             borderRadius: '14px',
                             fontSize: '1.05rem',
                             fontWeight: 600,
-                            border: result.cleared || showRevive ? '1px solid #E2DFD7' : 'none',
-                            boxShadow: result.cleared || showRevive
-                                ? '0 2px 6px rgba(0, 0, 0, 0.04)'
-                                : '0 6px 16px rgba(59, 106, 217, 0.28)',
-                            cursor: 'pointer',
-                            transition: 'transform 0.1s ease',
+                            border:
+                                result.cleared || showRevive ? '1px solid #E2DFD7' : 'none',
+                            boxShadow:
+                                result.cleared || showRevive
+                                    ? '0 2px 6px rgba(0, 0, 0, 0.04)'
+                                    : '0 6px 16px rgba(59, 106, 217, 0.28)',
+                            cursor: isCoolingDown ? 'not-allowed' : 'pointer',
+                            opacity: isCoolingDown ? 0.55 : 1,
+                            transition: 'transform 0.1s ease, opacity 0.2s ease',
                         }}
-                        onPointerDown={(e) =>
-                            (e.currentTarget.style.transform = 'scale(0.98)')
-                        }
-                        onPointerUp={(e) =>
-                            (e.currentTarget.style.transform = 'scale(1)')
-                        }
-                        onPointerLeave={(e) =>
-                            (e.currentTarget.style.transform = 'scale(1)')
-                        }
+                        onPointerDown={(e) => {
+                            if (!isCoolingDown) e.currentTarget.style.transform = 'scale(0.98)';
+                        }}
+                        onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                        onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
                     >
-                        Replay Level
+                        {isCoolingDown
+                            ? `Replay Unlocked in ${waitMm}:${waitSs}`
+                            : 'Replay Level'}
                     </button>
 
                     <button

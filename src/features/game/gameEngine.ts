@@ -13,7 +13,12 @@ export const PIECE_PALETTE = [
 ];
 
 const ARROW_COLOR = '#111111';
+const DANGER_COLOR = '#D93B4E';
+const HINT_COLOR = '#3B63D6';
 const BOARD_COLOR = '#ffffff';
+
+const SHAKE_DURATION = 360;
+
 /**
  * Generates the full exit track for a piece:
  * The body coordinates from tail (cells[0]) to head (cells[cells.length - 1]),
@@ -37,7 +42,6 @@ function sampleTrack(waypoints: [number, number][], u: number): [number, number]
     if (!waypoints || waypoints.length === 0) return [0, 0];
     if (waypoints.length === 1) return waypoints[0];
 
-    // Guard against NaN and negative values
     if (Number.isNaN(u) || u <= 0) return waypoints[0];
 
     const maxIdx = waypoints.length - 1;
@@ -132,14 +136,20 @@ export class GameEngine {
     public slidingPieces: SlidingPiece[] = [];
     public particles: Particle[] = [];
     public grid: number[][];
-    public shakingPieceId: number | null = null;
-    public shakeStartTime: number = 0;
+
+    // Supports multiple simultaneous shakes + flashes the blocking cell on mistake
+    public shakingPieces: Map<number, number> = new Map();
+    public blockedCellFlash: { r: number; c: number; startTime: number } | null = null;
+
     public hintPieceId: number | null = null;
     public hintStartTime: number = 0;
 
     constructor(config: LevelConfig) {
         this.config = config;
-        this.remainingPieces = config.pieces.map((p) => ({ ...p, cells: [...p.cells] }));
+        this.remainingPieces = config.pieces.map((p) => ({
+            ...p,
+            cells: p.cells.map(([r, c]) => [r, c] as [number, number]),
+        }));
         this.grid = Array.from({ length: config.rows }, () => Array(config.cols).fill(-1));
         this.refreshGrid();
     }
@@ -165,14 +175,46 @@ export class GameEngine {
         return canExit(p, this.grid, this.config.rows, this.config.cols);
     }
 
-    public triggerShake(pieceId: number, now: number): void {
-        if (motion.reduced) return;
-        this.shakingPieceId = pieceId;
-        this.shakeStartTime = now;
+    /**
+     * Finds the first cell along the piece's exit ray that blocks it, so we can highlight the collision.
+     */
+    public findBlockerCell(pieceId: number): [number, number] | null {
+        const p = this.remainingPieces.find((item) => item.id === pieceId);
+        if (!p) return null;
+        const rays = rayCells(p, this.config.rows, this.config.cols);
+        for (const [rr, cc] of rays) {
+            const occupant = this.grid[rr]?.[cc];
+            if (occupant !== undefined && occupant !== -1 && occupant !== p.id) {
+                return [rr, cc];
+            }
+        }
+        return null;
     }
 
+    /**
+     * Finds the best valid movable piece for the Hint button.
+     */
+    public findBestHintPiece(): Piece | null {
+        for (const p of this.remainingPieces) {
+            if (canExit(p, this.grid, this.config.rows, this.config.cols)) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    public triggerShake(pieceId: number, now: number): void {
+        this.shakingPieces.set(pieceId, now);
+        const blocker = this.findBlockerCell(pieceId);
+        if (blocker) {
+            this.blockedCellFlash = { r: blocker[0], c: blocker[1], startTime: now };
+        }
+    }
+
+    /**
+     * Highlights a movable piece. Does NOT auto-expire after 2.5s so rewarded-ad hints aren't lost!
+     */
     public setHint(pieceId: number, now: number): void {
-        if (motion.reduced) return;
         this.hintPieceId = pieceId;
         this.hintStartTime = now;
     }
@@ -188,10 +230,11 @@ export class GameEngine {
         this.slidingPieces.push({
             piece: cleared,
             startTime: now,
-            duration: 400, // Balanced duration for smooth corner navigation
+            duration: 400,
             color,
         });
 
+        this.shakingPieces.delete(pieceId);
         if (this.hintPieceId === pieceId) {
             this.hintPieceId = null;
         }
@@ -204,7 +247,6 @@ export class GameEngine {
         const head = piece.cells[piece.cells.length - 1];
         const px = pad + head[1] * cellSize + cellSize / 2;
         const py = pad + head[0] * cellSize + cellSize / 2;
-        //const color = PIECE_PALETTE[piece.id % PIECE_PALETTE.length];
         const color = ARROW_COLOR;
 
         for (let i = 0; i < 18; i++) {
@@ -225,12 +267,14 @@ export class GameEngine {
 
     public update(now: number, dt: number): { completedSlides: boolean } {
         let completed = false;
+        // Scale velocity to 60fps baseline so 120Hz displays don't double particle speed
+        const stepScale = Math.min(3, Math.max(0.1, dt * 60));
 
         // Update Particles
         for (let i = this.particles.length - 1; i >= 0; i--) {
             const pt = this.particles[i];
-            pt.x += pt.vx;
-            pt.y += pt.vy;
+            pt.x += pt.vx * stepScale;
+            pt.y += pt.vy * stepScale;
             pt.life -= dt * 2.2;
             pt.alpha = Math.max(0, pt.life);
             if (pt.life <= 0) {
@@ -248,14 +292,15 @@ export class GameEngine {
             }
         }
 
-        // Update Shake timeout
-        if (this.shakingPieceId !== null && now - this.shakeStartTime > 320) {
-            this.shakingPieceId = null;
+        // Clean up finished shakes
+        for (const [id, startTime] of this.shakingPieces.entries()) {
+            if (now - startTime > SHAKE_DURATION) {
+                this.shakingPieces.delete(id);
+            }
         }
 
-        // Update Hint timeout
-        if (this.hintPieceId !== null && now - this.hintStartTime > 2500) {
-            this.hintPieceId = null;
+        if (this.blockedCellFlash && now - this.blockedCellFlash.startTime > SHAKE_DURATION) {
+            this.blockedCellFlash = null;
         }
 
         return { completedSlides: completed };
@@ -285,12 +330,31 @@ export class GameEngine {
             }
         }
 
+        // Collision / Blocker Flash (shows the player WHICH cell blocked their arrow)
+        if (this.blockedCellFlash) {
+            const { r, c, startTime } = this.blockedCellFlash;
+            const progress = Math.min(1, Math.max(0, (now - startTime) / SHAKE_DURATION));
+            const flashAlpha = (1 - progress) * 0.32;
+            const bx = pad + c * cellSize + 3;
+            const by = pad + r * cellSize + 3;
+            ctx.save();
+            ctx.fillStyle = `rgba(217, 59, 78, ${flashAlpha})`;
+            ctx.strokeStyle = `rgba(217, 59, 78, ${(1 - progress) * 0.75})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(bx, by, cellSize - 6, cellSize - 6, 8);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
         // Hint Guide Runway
         if (this.hintPieceId !== null) {
             const hintPiece = this.remainingPieces.find((p) => p.id === this.hintPieceId);
             if (hintPiece) {
                 const rays = rayCells(hintPiece, this.config.rows, this.config.cols);
-                ctx.fillStyle = 'rgba(79, 140, 255, 0.12)';
+                const pulse = motion.reduced ? 1 : 0.65 + 0.35 * Math.sin((now - this.hintStartTime) / 180);
+                ctx.fillStyle = `rgba(59, 99, 214, ${0.14 * pulse})`;
                 for (const [rr, cc] of rays) {
                     const rx = pad + cc * cellSize + 2;
                     const ry = pad + rr * cellSize + 2;
@@ -306,40 +370,43 @@ export class GameEngine {
             let ox = 0;
             let oy = 0;
             let alpha = 1;
+            let pieceColor = ARROW_COLOR;
 
-            // Shake animation
-            if (piece.id === this.shakingPieceId) {
-                const t = now - this.shakeStartTime;
-                const progress = Math.min(1, t / 320);
-                const intensity = Math.sin(t / 25) * 6 * (1 - progress);
-                const [dr, dc] = DELTA[piece.dir];
-                ox = dc * intensity;
-                oy = dr * intensity;
+            // Shake + Red Flash on mistake
+            const shakeStart = this.shakingPieces.get(piece.id);
+            if (shakeStart !== undefined) {
+                const t = Math.max(0, now - shakeStart);
+                const progress = Math.min(1, t / SHAKE_DURATION);
+                pieceColor = DANGER_COLOR;
+                if (!motion.reduced) {
+                    const intensity = Math.sin(t / 22) * 6 * (1 - progress);
+                    const [dr, dc] = DELTA[piece.dir];
+                    ox = dc * intensity;
+                    oy = dr * intensity;
+                }
+            } else if (piece.id === this.hintPieceId) {
+                // Hint highlight: tint the hinted arrow blue so it stands out clearly
+                pieceColor = HINT_COLOR;
+                if (!motion.reduced) {
+                    const t = now - this.hintStartTime;
+                    alpha = 0.65 + 0.35 * Math.abs(Math.cos(t / 160));
+                }
             }
 
-            // Hint pulse animation
-            if (piece.id === this.hintPieceId) {
-                const t = now - this.hintStartTime;
-                alpha = 0.45 + 0.55 * Math.abs(Math.cos(t / 140));
-            }
-
-            this.renderSnakePiece(ctx, piece, 0, ox, oy, alpha, cellSize, pad);
+            this.renderSnakePiece(ctx, piece, 0, ox, oy, alpha, cellSize, pad, pieceColor);
         }
 
         // 2. Render Sliding Escaping Pieces (Snake Movement)
-        // 2. Render Sliding Escaping Pieces (Snake Movement)
         for (const slide of this.slidingPieces) {
-            // Clamp between 0 and 1 so t is never negative
             const elapsed = Math.max(0, now - slide.startTime);
             const t = Math.min(1, elapsed / (slide.duration || 400));
 
-            // Accelerating curve: smooth launch, rapid exit
             const progress = Math.pow(t, 2.1);
             const dMax = Math.max(this.config.rows, this.config.cols) + slide.piece.cells.length + 3;
             const dist = dMax * progress;
             const alpha = Math.max(0, 1 - t * 0.5);
 
-            this.renderSnakePiece(ctx, slide.piece, dist, 0, 0, alpha, cellSize, pad);
+            this.renderSnakePiece(ctx, slide.piece, dist, 0, 0, alpha, cellSize, pad, ARROW_COLOR);
         }
 
         // 3. Render Particle Sparks
@@ -362,10 +429,10 @@ export class GameEngine {
         oy: number,
         alpha: number,
         cellSize: number,
-        pad: number
+        pad: number,
+        color: string = ARROW_COLOR
     ): void {
         const s = cellSize;
-        const color = ARROW_COLOR;
 
         const { coords, headDir } = getSnakeVertices(p, dist, cellSize, pad, ox, oy);
         if (coords.length === 0) return;
@@ -394,10 +461,12 @@ export class GameEngine {
         let shaft: [number, number][];
 
         if (coords.length === 1) {
-            // Single-cell piece: give it a real stem so tail and head are visibly joined
             const tailX = hx - dx * s * 0.6;
             const tailY = hy - dy * s * 0.6;
-            shaft = [[tailX, tailY], [notchX, notchY]];
+            shaft = [
+                [tailX, tailY],
+                [notchX, notchY],
+            ];
         } else {
             const n = coords.length;
             shaft = coords.map(([x, y]) => [x, y] as [number, number]);
@@ -408,14 +477,11 @@ export class GameEngine {
                 segLen < 0.0001 || Math.abs((segX * dx + segY * dy) / segLen) > 0.99;
 
             if (aligned) {
-                // Straight into the head: stop at the notch
                 const trim = Math.min(segLen, s * NOTCH);
                 if (segLen > 0.0001) {
                     shaft[n - 1] = [hx - (segX / segLen) * trim, hy - (segY / segLen) * trim];
                 }
             } else {
-                // Bent into the head: run to the tip cell center, then back along the
-                // head axis to the notch so the body enters the arrowhead.
                 shaft.push([notchX, notchY]);
             }
         }
@@ -462,17 +528,19 @@ export class GameEngine {
                     const uPx = -uDy;
                     const uPy = uDx;
                     ctx.beginPath();
-                    ctx.moveTo(mx - uDx * s * 0.07 + uPx * s * 0.09, my - uDy * s * 0.07 + uPy * s * 0.09);
+                    ctx.moveTo(
+                        mx - uDx * s * 0.07 + uPx * s * 0.09,
+                        my - uDy * s * 0.07 + uPy * s * 0.09
+                    );
                     ctx.lineTo(mx + uDx * s * 0.07, my + uDy * s * 0.07);
-                    ctx.lineTo(mx - uDx * s * 0.07 - uPx * s * 0.09, my - uDy * s * 0.07 - uPy * s * 0.09);
+                    ctx.lineTo(
+                        mx - uDx * s * 0.07 - uPx * s * 0.09,
+                        my - uDy * s * 0.07 - uPy * s * 0.09
+                    );
                     ctx.stroke();
                 }
             }
         }
-
-        // Reset stroke style for the arrowhead section
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
 
         // --- B. Arrowhead: tip exactly on the grid point ---
         const baseX = hx - dx * s * HEAD_LEN;

@@ -16,13 +16,14 @@ interface UntangleScreenProps {
     level: number;
     onFinished: (result: RoundResult) => void;
     onOpenPause: () => void;
-    /** Resolve true when the player earned the hint, e.g. after a rewarded ad. Defaults to free. */
+    /** Resolve true when the player earned the hint, e.g. after a rewarded ad. */
     onRequestHint?: () => Promise<boolean>;
+    /** Increment this counter from the parent when the player revives via ResultsModal */
+    reviveSignal?: number;
     /** Best saved score for this level, used to flag a new high score. */
     bestScore?: number;
 }
 
-// Same palette as MainTab and the modals.
 const C = {
     cream: '#F5F3EB',
     charcoal: '#1F2326',
@@ -38,18 +39,28 @@ const C = {
 const PAD = 20;
 const NODE_R = 11;
 const HIT_R = 28;
+const SNAP_DIST = 0.055;
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 interface ActionButtonProps {
     label: string;
+    badge?: string;
     icon: React.ReactNode;
     onClick: () => void;
+    disabled?: boolean;
 }
 
-const ActionButton: React.FC<ActionButtonProps> = ({ label, icon, onClick }) => (
+const ActionButton: React.FC<ActionButtonProps> = ({
+    label,
+    badge,
+    icon,
+    onClick,
+    disabled = false,
+}) => (
     <button
         onClick={onClick}
+        disabled={disabled}
         style={{
             flex: 1,
             height: '50px',
@@ -60,19 +71,36 @@ const ActionButton: React.FC<ActionButtonProps> = ({ label, icon, onClick }) => 
             boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)',
             fontSize: '0.98rem',
             fontWeight: 600,
-            cursor: 'pointer',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.6 : 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: '8px',
-            transition: 'transform 0.1s ease',
+            transition: 'transform 0.1s ease, opacity 0.15s ease',
         }}
-        onPointerDown={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
+        onPointerDown={(e) => {
+            if (!disabled) e.currentTarget.style.transform = 'scale(0.98)';
+        }}
         onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
         onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
     >
         {icon}
-        {label}
+        <span>{label}</span>
+        {badge && (
+            <span
+                style={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    padding: '2px 6px',
+                    borderRadius: '6px',
+                    backgroundColor: '#F0EDE4',
+                    color: C.muted,
+                }}
+            >
+                {badge}
+            </span>
+        )}
     </button>
 );
 
@@ -81,6 +109,7 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
     onFinished,
     onOpenPause,
     onRequestHint,
+    reviveSignal = 0,
     bestScore = 0,
 }) => {
     const lvl = useMemo(() => generateUntangleLevel(level), [level]);
@@ -100,20 +129,24 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
     } | null>(null);
     const anim = useRef<{ i: number; from: Pt; to: Pt; t0: number } | null>(null);
     const flashRef = useRef<{ i: number; until: number } | null>(null);
+    const hintTargetRef = useRef<{ i: number; to: Pt } | null>(null);
 
     const doneRef = useRef(false);
     const failedRef = useRef(false);
     const movesRef = useRef(0);
     const hintsRef = useRef(0);
     const mistakesRef = useRef(0);
+    const livesRef = useRef(MAX_LIVES);
     const secsRef = useRef(0);
 
     const [size, setSize] = useState(320);
     const [crossings, setCrossings] = useState(cross.current.count);
-    const [mistakes, setMistakes] = useState(0);
+    const [livesLeft, setLivesLeft] = useState(MAX_LIVES);
     const [seconds, setSeconds] = useState(0);
     const [done, setDone] = useState(false);
     const [failed, setFailed] = useState(false);
+    const [hasActiveHint, setHasActiveHint] = useState(false);
+    const [adBusy, setAdBusy] = useState(false);
 
     const finish = useCallback(
         (cleared: boolean) => {
@@ -144,10 +177,21 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
                     maxCombo: 0,
                     isNewHigh: cleared && score > bestScore,
                 });
-            }, 700);
+            }, 500);
         },
         [lvl, level, bestScore, onFinished]
     );
+
+    // Listen for revive signal from ResultsModal (+1 life and resume board)
+    useEffect(() => {
+        if (reviveSignal <= 0) return;
+        doneRef.current = false;
+        failedRef.current = false;
+        livesRef.current = 1;
+        setLivesLeft(1);
+        setDone(false);
+        setFailed(false);
+    }, [reviveSignal]);
 
     const recompute = useCallback(() => {
         cross.current = findCrossings(pts.current, lvl.edges);
@@ -159,16 +203,19 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
         drag.current = null;
         anim.current = null;
         flashRef.current = null;
+        hintTargetRef.current = null;
         doneRef.current = false;
         failedRef.current = false;
         movesRef.current = 0;
         hintsRef.current = 0;
         mistakesRef.current = 0;
+        livesRef.current = MAX_LIVES;
         secsRef.current = 0;
-        setMistakes(0);
+        setLivesLeft(MAX_LIVES);
         setSeconds(0);
         setDone(false);
         setFailed(false);
+        setHasActiveHint(false);
         recompute();
     }, [lvl, recompute]);
 
@@ -275,16 +322,46 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
                 }
             }
 
+            // Draw Visual Hint guide
+            const ht = hintTargetRef.current;
+            if (ht && !isDone) {
+                const [fx, fy] = toPx(pts.current[ht.i]);
+                const [tx, ty] = toPx(ht.to);
+                const pulse = 0.5 + 0.5 * Math.sin(now / 180);
+
+                ctx.save();
+                ctx.setLineDash([6, 6]);
+                ctx.strokeStyle = C.blue;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(fx, fy);
+                ctx.lineTo(tx, ty);
+                ctx.stroke();
+                ctx.restore();
+
+                ctx.strokeStyle = C.blue;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.arc(tx, ty, NODE_R + 3 + pulse * 4, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(59, 99, 214, 0.22)';
+                ctx.beginPath();
+                ctx.arc(tx, ty, NODE_R, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
             const flash = flashRef.current;
             pts.current.forEach((p, i) => {
                 const [x, y] = toPx(p);
                 const held = drag.current?.i === i;
                 const isFlashing = flash && flash.i === i && now < flash.until;
+                const isHinted = ht?.i === i;
 
-                if (held || isFlashing) {
+                if (held || isFlashing || isHinted) {
                     ctx.fillStyle = isFlashing
                         ? 'rgba(217, 59, 78, 0.28)'
-                        : 'rgba(59, 99, 214, 0.18)';
+                        : 'rgba(59, 99, 214, 0.22)';
                     ctx.beginPath();
                     ctx.arc(x, y, NODE_R + 9, 0, Math.PI * 2);
                     ctx.fill();
@@ -295,7 +372,9 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
                         : C.green
                     : isFlashing
                         ? C.danger
-                        : C.charcoal;
+                        : isHinted
+                            ? C.blue
+                            : C.charcoal;
                 ctx.beginPath();
                 ctx.arc(x, y, held ? NODE_R + 2 : NODE_R, 0, Math.PI * 2);
                 ctx.fill();
@@ -365,14 +444,33 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
         if (!d) return;
         drag.current = null;
 
+        // Snap to target if dragging the hinted node
+        const ht = hintTargetRef.current;
+        if (ht && ht.i === d.i) {
+            const distToTarget = Math.hypot(
+                pts.current[d.i].x - ht.to.x,
+                pts.current[d.i].y - ht.to.y
+            );
+            if (distToTarget <= SNAP_DIST) {
+                pts.current[d.i] = { ...ht.to };
+                hintTargetRef.current = null;
+                setHasActiveHint(false);
+                recompute();
+                if (cross.current.count === 0) finish(true);
+                return;
+            }
+        }
+
         if (d.moved) {
             movesRef.current += 1;
             if (cross.current.count > d.startCrossings) {
                 mistakesRef.current += 1;
-                setMistakes(mistakesRef.current);
+                livesRef.current = Math.max(0, livesRef.current - 1);
+                setLivesLeft(livesRef.current);
                 flashRef.current = { i: d.i, until: performance.now() + 450 };
 
-                if (mistakesRef.current >= MAX_LIVES) {
+                if (livesRef.current <= 0) {
+                    // Triggers unified ResultsModal with cleared: false!
                     finish(false);
                     return;
                 }
@@ -383,23 +481,42 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
     };
 
     const hint = async () => {
-        if (doneRef.current || anim.current) return;
-        const ok = onRequestHint ? await onRequestHint() : true;
-        if (!ok) return;
+        if (doneRef.current || anim.current || adBusy) return;
+
+        // 2nd tap on Hint auto-moves the highlighted node for free
+        if (hintTargetRef.current) {
+            const ht = hintTargetRef.current;
+            hintTargetRef.current = null;
+            setHasActiveHint(false);
+            anim.current = {
+                i: ht.i,
+                from: { ...pts.current[ht.i] },
+                to: { ...ht.to },
+                t0: performance.now(),
+            };
+            return;
+        }
+
         const i = bestHintNode(pts.current, lvl);
         if (i < 0) return;
+
+        if (onRequestHint) {
+            setAdBusy(true);
+            try {
+                const ok = await onRequestHint();
+                if (!ok) return;
+            } finally {
+                setAdBusy(false);
+            }
+        }
+
         hintsRef.current += 1;
-        anim.current = {
-            i,
-            from: { ...pts.current[i] },
-            to: { ...lvl.solution[i] },
-            t0: performance.now(),
-        };
+        hintTargetRef.current = { i, to: { ...lvl.solution[i] } };
+        setHasActiveHint(true);
     };
 
     const mm = Math.floor(seconds / 60);
     const ss = String(seconds % 60).padStart(2, '0');
-    const livesLeft = Math.max(0, MAX_LIVES - mistakes);
 
     return (
         <div
@@ -470,17 +587,19 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
                     minHeight: '20px',
                     fontSize: '0.9rem',
                     fontWeight: 500,
-                    color: failed ? C.danger : done ? C.green : C.muted,
+                    color: failed ? C.danger : done ? C.green : hasActiveHint ? C.blue : C.muted,
                     textAlign: 'center',
                 }}
             >
                 {failed
-                    ? 'Out of lives! Too many new crossings.'
+                    ? 'Out of lives!'
                     : done
                         ? 'Untangled.'
-                        : mistakes > 0
-                            ? `Careful — adding crossings costs a life (${livesLeft} left).`
-                            : 'Drag the dots until no lines cross.'}
+                        : hasActiveHint
+                            ? 'Drag the blue dot to the target circle (or tap Auto-Move).'
+                            : livesLeft < MAX_LIVES
+                                ? `Careful — adding crossings costs a life (${livesLeft} left).`
+                                : 'Drag the dots until no lines cross.'}
             </p>
 
             <footer
@@ -492,12 +611,15 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
                 }}
             >
                 <ActionButton
-                    label="Hint"
+                    label={hasActiveHint ? 'Auto-Move' : 'Hint'}
+                    badge={!hasActiveHint && onRequestHint ? 'AD' : undefined}
+                    disabled={adBusy || done || failed}
                     icon={<Lightbulb size={18} strokeWidth={2} aria-hidden />}
                     onClick={hint}
                 />
                 <ActionButton
                     label="Restart"
+                    disabled={adBusy}
                     icon={<RotateCcw size={18} strokeWidth={2} aria-hidden />}
                     onClick={reset}
                 />
