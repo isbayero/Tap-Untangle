@@ -5,6 +5,8 @@ import { sound } from '../services/audio';
 import { haptics } from '../services/haptics';
 import { music } from '../services/music';
 import { useAppLifecycle } from '../hooks/useAppLifecycle';
+import { SplashScreen } from '../components/SplashScreen';
+import { SplashScreen as CapSplashScreen } from '@capacitor/splash-screen';
 
 // Game & Modals
 import { GameScreen } from '../features/game/GameScreen';
@@ -33,6 +35,8 @@ const showRewardedAd = async (): Promise<boolean> => {
 };
 
 export const App: React.FC = () => {
+  // 1. ALL HOOKS DECLARED FIRST AT THE TOP (NO CONDITIONAL RETURNS ABOVE THIS)
+  const [showSplash, setShowSplash] = useState(true);
   const [progress, setProgress] = useState<PlayerProgress>(() => {
     const p = loadProgress();
     return {
@@ -42,7 +46,6 @@ export const App: React.FC = () => {
     };
   });
 
-  // Default mode is now 'untangle'
   const [screen, setScreen] = useState<AppScreen>('home');
   const [gameMode, setGameMode] = useState<GameMode>('untangle');
   const [activeLevel, setActiveLevel] = useState<number>(progress.untangleLevel ?? 1);
@@ -79,6 +82,11 @@ export const App: React.FC = () => {
       setCooldownUntil(0);
       setCooldownSecondsLeft(0);
     }
+  }, []);
+
+  useEffect(() => {
+    // Hide native Capacitor splash screen once React is ready
+    CapSplashScreen.hide().catch(() => { });
   }, []);
 
   // Tick global cooldown every second
@@ -123,8 +131,8 @@ export const App: React.FC = () => {
     }, [screen, roundResult])
   );
 
+  // 2. EVENT HANDLERS
   const handleStartGame = (mode: GameMode, level: number) => {
-    // Prevent starting a level while out-of-lives cooldown is active
     if (cooldownSecondsLeft > 0) return;
 
     setGameMode(mode);
@@ -141,12 +149,10 @@ export const App: React.FC = () => {
       setRoundResult(result);
 
       if (!result.cleared) {
-        // Start persistent 2-minute life cooldown so player cannot cheat by quitting/restarting
         setGlobalCooldown(Date.now() + COOLDOWN_DURATION_MS);
         return;
       }
 
-      // Cleared! Clear any active cooldown
       setGlobalCooldown(0);
 
       if (gameMode === 'untangle') {
@@ -197,7 +203,7 @@ export const App: React.FC = () => {
   };
 
   const handleReplay = () => {
-    if (cooldownSecondsLeft > 0) return; // Guard against replay during cooldown
+    if (cooldownSecondsLeft > 0) return;
     setRoundResult(null);
     setRevivesUsed(0);
     setReviveToken(0);
@@ -215,7 +221,6 @@ export const App: React.FC = () => {
     const rewarded = await showRewardedAd();
     if (!rewarded) return false;
 
-    // Clear the global cooldown and restore a life in the active game
     setGlobalCooldown(0);
     setRevivesUsed((n) => n + 1);
     setRoundResult(null);
@@ -223,7 +228,6 @@ export const App: React.FC = () => {
     return true;
   };
 
-  // Allows watching an ad from Home / Level Ladder to skip cooldown immediately
   const handleUnlockCooldownWithAd = async (): Promise<boolean> => {
     const rewarded = await showRewardedAd();
     if (!rewarded) return false;
@@ -239,9 +243,15 @@ export const App: React.FC = () => {
     });
   };
 
+  // 3. CONDITIONAL SPLASH SCREEN (NOW RENDERED AFTER ALL HOOKS)
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
+  // 4. MAIN APP RENDER
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      {/* 1. Main View Router */}
+      {/* Main View Router */}
       {screen === 'game' ? (
         gameMode === 'untangle' ? (
           <UntangleScreen
@@ -269,50 +279,49 @@ export const App: React.FC = () => {
             }}
           />
         )
-      ) : /* Home Hub Routing */
-        subView === 'achievements' ? (
-          <AchievementsTab progress={progress} onBack={() => setSubView('none')} />
-        ) : subView === 'awards' ? (
-          <AwardsTab progress={progress} onBack={() => setSubView('none')} />
-        ) : (
-          <>
-            {currentTab === 'main' && (
-              <MainTab
-                progress={progress}
-                onStartGame={handleStartGame}
-                onGoToDaily={() => setCurrentTab('daily')}
-                cooldownSecondsLeft={cooldownSecondsLeft}
-                onWatchAdRefill={handleUnlockCooldownWithAd}
-              />
-            )}
-            {currentTab === 'daily' && (
-              <DailyTab
-                progress={progress}
-                onBack={() => setCurrentTab('main')}
-                onStartLevel={(mode, lvl) => handleStartGame(mode, lvl)}
-                cooldownSecondsLeft={cooldownSecondsLeft}
-                onWatchAdRefill={handleUnlockCooldownWithAd}
-              />
-            )}
-            {currentTab === 'me' && (
-              <MeTab
-                onOpenSettings={() => setIsSettingsOpen(true)}
-                onOpenAchievements={() => setSubView('achievements')}
-                onOpenAwards={() => setSubView('awards')}
-              />
-            )}
-
-            <BottomNav
-              currentTab={currentTab}
-              onTabChange={(tab) => {
-                setCurrentTab(tab);
-                setSubView('none');
-              }}
+      ) : subView === 'achievements' ? (
+        <AchievementsTab progress={progress} onBack={() => setSubView('none')} />
+      ) : subView === 'awards' ? (
+        <AwardsTab progress={progress} onBack={() => setSubView('none')} />
+      ) : (
+        <>
+          {currentTab === 'main' && (
+            <MainTab
+              progress={progress}
+              onStartGame={handleStartGame}
+              onGoToDaily={() => setCurrentTab('daily')}
+              cooldownSecondsLeft={cooldownSecondsLeft}
+              onWatchAdRefill={handleUnlockCooldownWithAd}
             />
-          </>
-        )}
+          )}
+          {currentTab === 'daily' && (
+            <DailyTab
+              progress={progress}
+              onBack={() => setCurrentTab('main')}
+              onStartLevel={(mode, lvl) => handleStartGame(mode, lvl)}
+              cooldownSecondsLeft={cooldownSecondsLeft}
+              onWatchAdRefill={handleUnlockCooldownWithAd}
+            />
+          )}
+          {currentTab === 'me' && (
+            <MeTab
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenAchievements={() => setSubView('achievements')}
+              onOpenAwards={() => setSubView('awards')}
+            />
+          )}
 
-      {/* 2. Global Overlays & Modals */}
+          <BottomNav
+            currentTab={currentTab}
+            onTabChange={(tab) => {
+              setCurrentTab(tab);
+              setSubView('none');
+            }}
+          />
+        </>
+      )}
+
+      {/* Global Overlays & Modals */}
       <PauseModal
         isOpen={isPauseOpen}
         onOpenSettings={() => setIsSettingsOpen(true)}
