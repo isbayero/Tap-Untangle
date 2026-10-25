@@ -1,6 +1,6 @@
 import React from 'react';
 import { PlayerProgress, GameMode } from '../../types/gameTypes';
-import { Play } from 'lucide-react';
+import { Play, Network, ChevronRight } from 'lucide-react';
 
 // Palette sampled from the app icon
 const CREAM = '#F5F3EB';
@@ -137,6 +137,51 @@ export const MainTab: React.FC<MainTabProps> = ({ progress, onStartGame }) => {
                     <span style={{ fontSize: '1.2rem', fontWeight: 700 }}>
                         {progress.currentLevel > 1 ? 'Continue' : 'New Game'}
                     </span>
+                </button>
+                {/* Untangle mode */}
+                <button
+                    onClick={() => onStartGame('untangle', progress.untangleLevel ?? 1)}
+                    style={{
+                        width: '100%',
+                        height: '64px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E5E2D9',
+                        borderRadius: '18px',
+                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)',
+                        padding: '0 16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '14px',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'transform 0.1s ease',
+                    }}
+                    onPointerDown={(e) => (e.currentTarget.style.transform = 'scale(0.98)')}
+                    onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                    onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                >
+                    <span
+                        style={{
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(30, 158, 87, 0.12)',
+                            color: GREEN,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                        }}
+                    >
+                        <Network size={20} strokeWidth={2.2} aria-hidden />
+                    </span>
+                    <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontSize: '1rem', fontWeight: 700, color: CHARCOAL }}>Untangle</span>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 500, color: '#767B84' }}>
+                            Level {progress.untangleLevel ?? 1} · move the dots, no crossings
+                        </span>
+                    </span>
+                    <ChevronRight size={18} strokeWidth={2.2} color="#686E78" aria-hidden />
                 </button>
 
                 {/* Level chip */}

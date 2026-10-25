@@ -12,7 +12,7 @@ import { GameScreen } from '../features/game/GameScreen';
 import { PauseModal } from '../features/pause/PauseModal';
 import { ResultsModal } from '../features/results/ResultsModal';
 import { SettingsModal } from '../features/settings/SettingsModal';
-
+import { UntangleScreen } from '../features/untangle/UntangleScreen';
 // Navigation & Tabs
 import { BottomNav, TabType } from '../components/BottomNav';
 import { MainTab } from '../features/home/MainTab';
@@ -21,7 +21,7 @@ import { MeTab } from '../features/profile/MeTab';
 import { AchievementsTab } from '../features/awards/AchievementsTab';
 import { AwardsTab } from '../features/awards/AwardsTab';
 
-type AppScreen = 'home' | 'game';
+type AppScreen = 'home' | 'game' | 'untangle';
 
 // TEMP stub: replace with your real rewarded-ad SDK call.
 // Must resolve true ONLY when the player earned the reward.
@@ -31,7 +31,10 @@ const showRewardedAd = async (): Promise<boolean> => {
 };
 
 export const App: React.FC = () => {
-  const [progress, setProgress] = useState<PlayerProgress>(() => loadProgress());
+  const [progress, setProgress] = useState<PlayerProgress>(() => {
+    const p = loadProgress();
+    return { ...p, untangleLevel: p.untangleLevel ?? 1, untangleStats: p.untangleStats ?? {} };
+  });
   const [screen, setScreen] = useState<AppScreen>('home');
   const [gameMode, setGameMode] = useState<GameMode>('campaign');
   const [activeLevel, setActiveLevel] = useState<number>(progress.currentLevel);
@@ -81,9 +84,34 @@ export const App: React.FC = () => {
     setScreen('game');
   };
 
-  const handleRoundFinished = useCallback((result: RoundResult) => {
-    setRoundResult(result);
-    if (result.cleared) {
+  const handleRoundFinished = useCallback(
+    (result: RoundResult) => {
+      setRoundResult(result);
+      if (!result.cleared) return;
+
+      if (gameMode === 'untangle') {
+        setProgress((prev) => {
+          const old = prev.untangleStats?.[result.levelNumber];
+          const updated: PlayerProgress = {
+            ...prev,
+            untangleLevel: Math.max(prev.untangleLevel ?? 1, result.levelNumber + 1),
+            totalStars: prev.totalStars + Math.max(0, result.stars - (old?.stars ?? 0)),
+            untangleStats: {
+              ...(prev.untangleStats ?? {}),
+              [result.levelNumber]: {
+                stars: Math.max(old?.stars ?? 0, result.stars),
+                highScore: Math.max(old?.highScore ?? 0, result.score),
+                bestTime: old?.bestTime ? Math.min(old.bestTime, result.timeSpent) : result.timeSpent,
+                cleared: true,
+              },
+            },
+          };
+          saveProgress(updated);
+          return updated;
+        });
+        return;
+      }
+
       setProgress((prev) =>
         recordLevelCompletion(
           prev,
@@ -95,8 +123,9 @@ export const App: React.FC = () => {
           result.maxCombo
         )
       );
-    }
-  }, []);
+    },
+    [gameMode]
+  );
 
   const handleNextLevel = () => {
     setActiveLevel((l) => l + 1);
@@ -142,16 +171,27 @@ export const App: React.FC = () => {
 
       {/* 1. Main View Router */}
       {screen === 'game' ? (
-        <GameScreen
-          key={`${activeLevel}-${gameSessionKey}`}
-          level={activeLevel}
-          mode={gameMode}
-          reviveToken={reviveToken}
-          onExit={() => setScreen('home')}
-          onFinished={handleRoundFinished}
-          onOpenPause={() => setIsPauseOpen(true)}
-          onRestart={() => { setRevivesUsed(0); setReviveToken(0); }}
-        />
+        gameMode === 'untangle' ? (
+          <UntangleScreen
+            key={`untangle-${activeLevel}-${gameSessionKey}`}
+            level={activeLevel}
+            bestScore={progress.untangleStats?.[activeLevel]?.highScore}
+            onFinished={handleRoundFinished}
+            onOpenPause={() => setIsPauseOpen(true)}
+            onRequestHint={showRewardedAd}
+          />
+        ) : (
+          <GameScreen
+            key={`${activeLevel}-${gameSessionKey}`}
+            level={activeLevel}
+            mode={gameMode}
+            reviveToken={reviveToken}
+            onExit={() => setScreen('home')}
+            onFinished={handleRoundFinished}
+            onOpenPause={() => setIsPauseOpen(true)}
+            onRestart={() => { setRevivesUsed(0); setReviveToken(0); }}
+          />
+        )
       ) : (
         /* Home Hub Routing */
         subView === 'achievements' ? (
@@ -217,6 +257,7 @@ export const App: React.FC = () => {
         onHome={handleHome}
         onWatchAdRevive={handleWatchAdRevive}
         canRevive={revivesUsed < 1}
+        isUntangle={gameMode === 'untangle'}
       />
 
       <SettingsModal

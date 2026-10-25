@@ -10,6 +10,8 @@ interface ResultsModalProps {
     onWatchAdRevive?: () => Promise<boolean>;
     /** False once the player has already revived this round */
     canRevive?: boolean;
+    /** Untangle rounds report hints used in the third stat. */
+    isUntangle?: boolean;
 }
 
 export const ResultsModal: React.FC<ResultsModalProps> = ({
@@ -19,6 +21,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
     onHome,
     onWatchAdRevive,
     canRevive = true,
+    isUntangle = false,
 }) => {
     const [adLoading, setAdLoading] = useState(false);
     const [adError, setAdError] = useState<string | null>(null);
@@ -192,8 +195,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                     {/* Mistakes Column */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <span style={{ fontSize: '0.82rem', fontWeight: 500, color: '#5A606A' }}>
-                            Mistakes:
-                        </span>
+                            {isUntangle ? 'Hints:' : 'Mistakes:'}                        </span>
                         <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#181B20' }}>
                             {result.mistakes}
                         </span>

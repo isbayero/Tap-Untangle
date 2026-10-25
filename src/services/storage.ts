@@ -15,6 +15,8 @@ const DEFAULT_PROGRESS: PlayerProgress = {
     dailyCompletedDates: [],
     totalClearedPieces: 0,
     bestComboStreak: 0,
+    untangleLevel: 1,
+    untangleStats: {},
 };
 
 export function loadProgress(): PlayerProgress {

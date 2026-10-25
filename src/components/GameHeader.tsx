@@ -1,11 +1,14 @@
 import React from 'react';
 import { Pause } from 'lucide-react';
 
-const MAX_LIVES = 3;
+export const MAX_LIVES = 3;
 
 interface GameHeaderProps {
     level: number;
-    lives: number;
+    /** Number of lives remaining (0..MAX_LIVES). Defaults to MAX_LIVES. Pass null to hide pips. */
+    lives?: number | null;
+    /** Replaces the default "time · cleared/total" line. */
+    subtitle?: string;
     elapsedSeconds: number;
     clearedCount: number;
     totalCount: number;
@@ -14,14 +17,17 @@ interface GameHeaderProps {
 
 export const GameHeader: React.FC<GameHeaderProps> = ({
     level,
-    lives,
+    lives = MAX_LIVES,
+    subtitle,
     elapsedSeconds,
     clearedCount,
     totalCount,
     onPause,
 }) => {
-    const unlimited = !Number.isFinite(lives) || lives > MAX_LIVES;
-    const pct = totalCount > 0 ? Math.min(100, (clearedCount / totalCount) * 100) : 0;
+    const hasLives = lives !== null;
+    const livesLeft = Math.max(0, lives ?? MAX_LIVES);
+    const unlimited = !Number.isFinite(livesLeft) || livesLeft > MAX_LIVES;
+    const pct = totalCount > 0 ? Math.min(100, Math.max(0, (clearedCount / totalCount) * 100)) : 0;
     const mm = Math.floor(elapsedSeconds / 60);
     const ss = String(Math.floor(elapsedSeconds % 60)).padStart(2, '0');
 
@@ -98,7 +104,7 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
                             color: '#686E78',
                         }}
                     >
-                        {mm}:{ss} · {clearedCount}/{totalCount}
+                        {subtitle || `${mm}:${ss} · ${clearedCount}/${totalCount}`}
                     </span>
                 </div>
 
@@ -106,12 +112,13 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
                 <div
                     role="img"
                     aria-label={
-                        unlimited ? 'Unlimited lives' : `${lives} of ${MAX_LIVES} lives left`
+                        unlimited ? 'Unlimited lives' : `${livesLeft} of ${MAX_LIVES} lives left`
                     }
                     style={{
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
+                        visibility: hasLives ? 'visible' : 'hidden',
                         backgroundColor: '#FFFFFF',
                         border: '1px solid #E5E2D9',
                         borderRadius: '9999px',
@@ -120,7 +127,7 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
                     }}
                 >
                     {Array.from({ length: MAX_LIVES }, (_, i) => {
-                        const isOff = !unlimited && i >= lives;
+                        const isOff = !unlimited && i >= livesLeft;
                         return (
                             <span
                                 key={i}
@@ -130,7 +137,8 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
                                     height: '10px',
                                     borderRadius: '50%',
                                     backgroundColor: isOff ? '#D4D0C5' : '#E5484D',
-                                    transition: 'background-color 0.2s ease',
+                                    transform: isOff ? 'scale(0.85)' : 'scale(1)',
+                                    transition: 'background-color 0.2s ease, transform 0.2s ease',
                                 }}
                             />
                         );

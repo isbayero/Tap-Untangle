@@ -1,0 +1,51 @@
+arrow-escape/
+├── .gitignore
+├── capacitor.config.ts
+├── eslint.config.js
+├── index.html
+├── package.json
+├── README.md
+├── tsconfig.json
+├── tsconfig.node.json
+├── vite.config.ts
+├── src/
+│   ├── main.tsx
+│   ├── app/
+│   │   └── App.tsx
+│   ├── components/
+│   │   ├── Button.tsx
+│   │   ├── GameHeader.tsx
+│   │   ├── Modal.tsx
+│   │   └── ScoreDisplay.tsx
+│   ├── features/
+│   │   ├── game/
+│   │   │   ├── GameCanvas.tsx
+│   │   │   ├── gameEngine.ts
+│   │   │   ├── gameRules.ts
+│   │   │   ├── GameScreen.tsx
+│   │   │   └── scoring.ts
+│   │   ├── home/
+│   │   │   └── HomeScreen.tsx
+│   │   ├── pause/
+│   │   │   └── PauseModal.tsx
+│   │   ├── results/
+│   │   │   └── ResultsModal.tsx
+│   │   └── settings/
+│   │       └── SettingsModal.tsx
+│   ├── hooks/
+│   │   ├── useAppLifecycle.ts
+│   │   └── useGame.ts
+│   ├── services/
+│   │   ├── audio.ts
+│   │   ├── haptics.ts
+│   │   └── storage.ts
+│   ├── styles/
+│   │   ├── animations.css
+│   │   ├── global.css
+│   │   └── tokens.css
+│   └── types/
+│       └── gameTypes.ts
+└── tests/
+    ├── gameRules.test.ts
+    ├── scoring.test.ts
+    └── storage.test.ts

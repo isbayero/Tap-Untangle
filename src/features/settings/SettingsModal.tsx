@@ -91,6 +91,7 @@ const INFO: Record<Exclude<InfoKind, null>, { title: string; body: string[] }> =
             'Tap Untangle: Arrow Escape',
             'Version 1.0.4',
             'Free every arrow by tapping it in the right order. A wrong tap costs a life.',
+            'Untangle mode: drag the dots until no lines cross.',
         ],
     },
 };

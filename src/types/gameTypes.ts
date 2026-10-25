@@ -33,7 +33,7 @@ export interface LevelConfig {
     pieces: Piece[];
 }
 
-export type GameMode = 'campaign' | 'zen' | 'daily';
+export type GameMode = 'campaign' | 'zen' | 'daily' | 'untangle';
 
 export interface LevelStats {
     stars: number;
@@ -57,6 +57,8 @@ export interface PlayerProgress {
     dailyCompletedDates: string[];
     totalClearedPieces: number;
     bestComboStreak: number;
+    untangleLevel: number;
+    untangleStats: Record<number, LevelStats>;
 }
 
 export interface RoundResult {
