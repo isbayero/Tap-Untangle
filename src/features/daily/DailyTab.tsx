@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, Lock, Check, Play, Star, Target } from 'lucide-react';
-import { PlayerProgress } from '../../types/gameTypes';
+import { ChevronLeft, Lock, Check, Play, Star, Target, Film } from 'lucide-react';
+import { GameMode, PlayerProgress } from '../../types/gameTypes';
 
 // Palette sampled from the app icon
 const CREAM = '#F5F3EB';
@@ -9,11 +9,14 @@ const GREEN = '#1E9E57';
 const BLUE = '#3B63D6';
 const ORANGE = '#F47B20';
 const GOLD = '#F59E0B';
+const DANGER = '#D93B4E';
 
 interface DailyTabProps {
     onBack: () => void;
-    onStartDaily: (level: number) => void;
+    onStartLevel: (mode: GameMode, level: number) => void;
     progress: PlayerProgress;
+    cooldownSecondsLeft?: number;
+    onWatchAdRefill?: () => Promise<boolean>;
 }
 
 const TOTAL_LEVELS = 300;
@@ -42,10 +45,29 @@ const buildPath = (from: number, to: number): string => {
     return d;
 };
 
-export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progress }) => {
-    const currentUnlockedLevel = progress.currentLevel;
-    const totalStars = progress.totalStars ?? 0;
-    const campaignStats = progress.campaignStats ?? {};
+export const DailyTab: React.FC<DailyTabProps> = ({
+    onBack,
+    onStartLevel,
+    progress,
+    cooldownSecondsLeft = 0,
+    onWatchAdRefill,
+}) => {
+    // Untangle is the primary mode on the ladder
+    const [ladderMode, setLadderMode] = useState<'untangle' | 'campaign'>('untangle');
+    const [adLoading, setAdLoading] = useState(false);
+
+    const isUntangle = ladderMode === 'untangle';
+    const currentUnlockedLevel = isUntangle
+        ? (progress.untangleLevel ?? 1)
+        : (progress.currentLevel ?? 1);
+    const activeStats = isUntangle
+        ? (progress.untangleStats ?? {})
+        : (progress.campaignStats ?? {});
+
+    // Compute stars for the currently viewed mode
+    const modeStars = useMemo(() => {
+        return Object.values(activeStats).reduce((sum, s) => sum + (s?.stars ?? 0), 0);
+    }, [activeStats]);
 
     const currentIdx = Math.min(Math.max(currentUnlockedLevel - 1, 0), TOTAL_LEVELS - 1);
 
@@ -54,7 +76,7 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
 
     useEffect(() => {
         setSelectedLevel(currentUnlockedLevel);
-    }, [currentUnlockedLevel]);
+    }, [currentUnlockedLevel, ladderMode]);
 
     const scrollToCurrent = useCallback(
         (smooth: boolean) => {
@@ -70,18 +92,40 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
 
     useEffect(() => {
         scrollToCurrent(false);
-    }, [scrollToCurrent]);
+    }, [scrollToCurrent, ladderMode]);
 
     const levels = useMemo(() => Array.from({ length: TOTAL_LEVELS }, (_, i) => i + 1), []);
     const donePath = useMemo(() => buildPath(0, currentIdx), [currentIdx]);
     const restPath = useMemo(() => buildPath(currentIdx, TOTAL_LEVELS - 1), [currentIdx]);
 
     const ladderHeight = TOP_PAD * 2 + (TOTAL_LEVELS - 1) * ROW_H;
-    const progressPct = Math.min(100, (Math.max(0, currentUnlockedLevel - 1) / TOTAL_LEVELS) * 100);
+    const progressPct = Math.min(
+        100,
+        (Math.max(0, currentUnlockedLevel - 1) / TOTAL_LEVELS) * 100
+    );
 
-    const selectedStats = campaignStats[selectedLevel];
+    const selectedStats = activeStats[selectedLevel];
     const selectedStars = selectedStats?.stars ?? (selectedLevel < currentUnlockedLevel ? 3 : 0);
     const selectedCleared = !!selectedStats?.cleared || selectedLevel < currentUnlockedLevel;
+
+    const isCoolingDown = cooldownSecondsLeft > 0;
+    const mm = Math.floor(cooldownSecondsLeft / 60);
+    const ss = String(cooldownSecondsLeft % 60).padStart(2, '0');
+
+    const handlePrimaryAction = async () => {
+        if (isCoolingDown) {
+            if (!onWatchAdRefill || adLoading) return;
+            setAdLoading(true);
+            try {
+                const ok = await onWatchAdRefill();
+                if (ok) onStartLevel(ladderMode, selectedLevel);
+            } finally {
+                setAdLoading(false);
+            }
+            return;
+        }
+        onStartLevel(ladderMode, selectedLevel);
+    };
 
     return (
         <div
@@ -112,7 +156,7 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '14px',
+                    gap: '12px',
                 }}
             >
                 {/* Top bar */}
@@ -144,17 +188,51 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                         <ChevronLeft size={22} />
                     </button>
 
-                    <h2
+                    {/* Segmented Mode Toggle: Untangle (Main) vs Arrows */}
+                    <div
                         style={{
-                            margin: 0,
-                            fontSize: '1.3rem',
-                            fontWeight: 800,
-                            color: CHARCOAL,
-                            letterSpacing: '-0.02em',
+                            display: 'flex',
+                            backgroundColor: '#EAE6DD',
+                            padding: '4px',
+                            borderRadius: '9999px',
+                            gap: '4px',
                         }}
                     >
-                        Level Ladder
-                    </h2>
+                        <button
+                            onClick={() => setLadderMode('untangle')}
+                            style={{
+                                border: 'none',
+                                borderRadius: '9999px',
+                                padding: '6px 14px',
+                                fontSize: '0.84rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                backgroundColor: isUntangle ? '#FFFFFF' : 'transparent',
+                                color: isUntangle ? CHARCOAL : '#686E78',
+                                boxShadow: isUntangle ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
+                                transition: 'all 0.15s ease',
+                            }}
+                        >
+                            Untangle
+                        </button>
+                        <button
+                            onClick={() => setLadderMode('campaign')}
+                            style={{
+                                border: 'none',
+                                borderRadius: '9999px',
+                                padding: '6px 14px',
+                                fontSize: '0.84rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                backgroundColor: !isUntangle ? '#FFFFFF' : 'transparent',
+                                color: !isUntangle ? CHARCOAL : '#686E78',
+                                boxShadow: !isUntangle ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
+                                transition: 'all 0.15s ease',
+                            }}
+                        >
+                            Arrows
+                        </button>
+                    </div>
 
                     <button
                         onClick={() => scrollToCurrent(true)}
@@ -197,10 +275,14 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                                 marginBottom: '8px',
                             }}
                         >
-                            <span style={{ fontSize: '0.78rem', fontWeight: 600, color: '#5A606A' }}>
-                                Progress
+                            <span
+                                style={{ fontSize: '0.78rem', fontWeight: 600, color: '#5A606A' }}
+                            >
+                                {isUntangle ? 'Untangle Progress' : 'Arrows Progress'}
                             </span>
-                            <span style={{ fontSize: '0.9rem', fontWeight: 800, color: CHARCOAL }}>
+                            <span
+                                style={{ fontSize: '0.9rem', fontWeight: 800, color: CHARCOAL }}
+                            >
                                 {currentUnlockedLevel}/{TOTAL_LEVELS}
                             </span>
                         </div>
@@ -251,7 +333,7 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                             }}
                         >
                             <Star size={14} fill={GOLD} color={GOLD} />
-                            {totalStars}/{TOTAL_LEVELS * 3}
+                            {modeStars}/{TOTAL_LEVELS * 3}
                         </span>
                     </div>
                 </div>
@@ -316,8 +398,9 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
 
                             {/* Level nodes */}
                             {levels.map((lvl, idx) => {
-                                const stats = campaignStats[lvl];
-                                const isCompleted = !!stats?.cleared || lvl < currentUnlockedLevel;
+                                const stats = activeStats[lvl];
+                                const isCompleted =
+                                    !!stats?.cleared || lvl < currentUnlockedLevel;
                                 const isCurrent = lvl === currentUnlockedLevel;
                                 const isUnlocked = lvl <= currentUnlockedLevel;
                                 const isSelected = lvl === selectedLevel;
@@ -347,7 +430,9 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                                         <button
                                             disabled={!isUnlocked}
                                             onClick={() => setSelectedLevel(lvl)}
-                                            aria-label={isUnlocked ? `Level ${lvl}` : `Level ${lvl} locked`}
+                                            aria-label={
+                                                isUnlocked ? `Level ${lvl}` : `Level ${lvl} locked`
+                                            }
                                             style={{
                                                 position: 'absolute',
                                                 left: `${xFor(idx) - size / 2}px`,
@@ -379,7 +464,9 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                                                 <>
                                                     <span
                                                         style={{
-                                                            fontSize: isMilestone ? '1.1rem' : '1rem',
+                                                            fontSize: isMilestone
+                                                                ? '1.1rem'
+                                                                : '1rem',
                                                             fontWeight: 800,
                                                             lineHeight: 1,
                                                         }}
@@ -439,7 +526,7 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                         }}
                     >
                         <span style={{ fontSize: '0.9rem', fontWeight: 700, color: CHARCOAL }}>
-                            Level {selectedLevel}
+                            {isUntangle ? 'Untangle' : 'Arrows'} · Level {selectedLevel}
                         </span>
                         {selectedCleared ? (
                             <span style={{ display: 'flex', gap: '3px' }}>
@@ -460,18 +547,22 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                     </div>
 
                     <button
-                        onClick={() => onStartDaily(selectedLevel)}
+                        onClick={handlePrimaryAction}
+                        disabled={isCoolingDown && (!onWatchAdRefill || adLoading)}
                         style={{
                             width: '100%',
                             height: '58px',
-                            backgroundColor: BLUE,
+                            backgroundColor: isCoolingDown ? DANGER : BLUE,
                             color: '#FFFFFF',
                             borderRadius: '18px',
                             border: 'none',
-                            fontSize: '1.1rem',
+                            fontSize: '1.05rem',
                             fontWeight: 700,
-                            boxShadow: '0 8px 20px rgba(59, 99, 214, 0.35)',
-                            cursor: 'pointer',
+                            boxShadow: isCoolingDown
+                                ? '0 8px 20px rgba(217, 59, 78, 0.3)'
+                                : '0 8px 20px rgba(59, 99, 214, 0.35)',
+                            cursor:
+                                isCoolingDown && !onWatchAdRefill ? 'not-allowed' : 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -482,8 +573,19 @@ export const DailyTab: React.FC<DailyTabProps> = ({ onBack, onStartDaily, progre
                         onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
                         onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
                     >
-                        <Play size={20} fill="#FFFFFF" />
-                        Play Level {selectedLevel}
+                        {isCoolingDown ? (
+                            <>
+                                <Film size={20} />
+                                {adLoading
+                                    ? 'Loading Ad…'
+                                    : `Watch Ad to Play Now (or wait ${mm}:${ss})`}
+                            </>
+                        ) : (
+                            <>
+                                <Play size={20} fill="#FFFFFF" />
+                                Play Level {selectedLevel}
+                            </>
+                        )}
                     </button>
                 </div>
             </div>

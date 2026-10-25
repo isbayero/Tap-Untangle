@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GameMode, PlayerProgress, RoundResult } from '../types/gameTypes';
+import { GameMode, PlayerProgress, RoundResult, motion } from '../types/gameTypes';
 import { loadProgress, saveProgress, recordLevelCompletion } from '../services/storage';
 import { sound } from '../services/audio';
 import { haptics } from '../services/haptics';
 import { music } from '../services/music';
-import { motion } from '../types/gameTypes';
 import { useAppLifecycle } from '../hooks/useAppLifecycle';
 
 // Game & Modals
@@ -21,7 +20,10 @@ import { MeTab } from '../features/profile/MeTab';
 import { AchievementsTab } from '../features/awards/AchievementsTab';
 import { AwardsTab } from '../features/awards/AwardsTab';
 
-type AppScreen = 'home' | 'game' | 'untangle';
+type AppScreen = 'home' | 'game';
+
+const COOLDOWN_STORAGE_KEY = 'tap_untangle_cooldown_until';
+const COOLDOWN_DURATION_MS = 120 * 1000; // 2 minutes wait when out of lives
 
 // TEMP stub: replace with your real rewarded-ad SDK call.
 // Must resolve true ONLY when the player earned the reward.
@@ -33,11 +35,17 @@ const showRewardedAd = async (): Promise<boolean> => {
 export const App: React.FC = () => {
   const [progress, setProgress] = useState<PlayerProgress>(() => {
     const p = loadProgress();
-    return { ...p, untangleLevel: p.untangleLevel ?? 1, untangleStats: p.untangleStats ?? {} };
+    return {
+      ...p,
+      untangleLevel: p.untangleLevel ?? 1,
+      untangleStats: p.untangleStats ?? {},
+    };
   });
+
+  // Default mode is now 'untangle'
   const [screen, setScreen] = useState<AppScreen>('home');
-  const [gameMode, setGameMode] = useState<GameMode>('campaign');
-  const [activeLevel, setActiveLevel] = useState<number>(progress.currentLevel);
+  const [gameMode, setGameMode] = useState<GameMode>('untangle');
+  const [activeLevel, setActiveLevel] = useState<number>(progress.untangleLevel ?? 1);
 
   // Tab & Subview Routing
   const [currentTab, setCurrentTab] = useState<TabType>('main');
@@ -50,6 +58,47 @@ export const App: React.FC = () => {
   const [reviveToken, setReviveToken] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [gameSessionKey, setGameSessionKey] = useState<number>(0);
+
+  // Persistent anti-cheat cooldown timestamp (ms)
+  const [cooldownUntil, setCooldownUntil] = useState<number>(() => {
+    const raw = localStorage.getItem(COOLDOWN_STORAGE_KEY);
+    const parsed = raw ? parseInt(raw, 10) : 0;
+    return Number.isFinite(parsed) && parsed > Date.now() ? parsed : 0;
+  });
+  const [cooldownSecondsLeft, setCooldownSecondsLeft] = useState<number>(() =>
+    Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000))
+  );
+
+  const setGlobalCooldown = useCallback((untilMs: number) => {
+    if (untilMs > Date.now()) {
+      localStorage.setItem(COOLDOWN_STORAGE_KEY, String(untilMs));
+      setCooldownUntil(untilMs);
+      setCooldownSecondsLeft(Math.max(0, Math.ceil((untilMs - Date.now()) / 1000)));
+    } else {
+      localStorage.removeItem(COOLDOWN_STORAGE_KEY);
+      setCooldownUntil(0);
+      setCooldownSecondsLeft(0);
+    }
+  }, []);
+
+  // Tick global cooldown every second
+  useEffect(() => {
+    if (cooldownUntil <= Date.now()) {
+      setCooldownSecondsLeft(0);
+      return;
+    }
+    const tick = () => {
+      const rem = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownSecondsLeft(rem);
+      if (rem <= 0) {
+        localStorage.removeItem(COOLDOWN_STORAGE_KEY);
+        setCooldownUntil(0);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
 
   useEffect(() => {
     sound.setEnabled(progress.soundEnabled);
@@ -75,6 +124,9 @@ export const App: React.FC = () => {
   );
 
   const handleStartGame = (mode: GameMode, level: number) => {
+    // Prevent starting a level while out-of-lives cooldown is active
+    if (cooldownSecondsLeft > 0) return;
+
     setGameMode(mode);
     setActiveLevel(level);
     setRoundResult(null);
@@ -87,7 +139,15 @@ export const App: React.FC = () => {
   const handleRoundFinished = useCallback(
     (result: RoundResult) => {
       setRoundResult(result);
-      if (!result.cleared) return;
+
+      if (!result.cleared) {
+        // Start persistent 2-minute life cooldown so player cannot cheat by quitting/restarting
+        setGlobalCooldown(Date.now() + COOLDOWN_DURATION_MS);
+        return;
+      }
+
+      // Cleared! Clear any active cooldown
+      setGlobalCooldown(0);
 
       if (gameMode === 'untangle') {
         setProgress((prev) => {
@@ -101,7 +161,9 @@ export const App: React.FC = () => {
               [result.levelNumber]: {
                 stars: Math.max(old?.stars ?? 0, result.stars),
                 highScore: Math.max(old?.highScore ?? 0, result.score),
-                bestTime: old?.bestTime ? Math.min(old.bestTime, result.timeSpent) : result.timeSpent,
+                bestTime: old?.bestTime
+                  ? Math.min(old.bestTime, result.timeSpent)
+                  : result.timeSpent,
                 cleared: true,
               },
             },
@@ -124,7 +186,7 @@ export const App: React.FC = () => {
         )
       );
     },
-    [gameMode]
+    [gameMode, setGlobalCooldown]
   );
 
   const handleNextLevel = () => {
@@ -135,10 +197,11 @@ export const App: React.FC = () => {
   };
 
   const handleReplay = () => {
+    if (cooldownSecondsLeft > 0) return; // Guard against replay during cooldown
     setRoundResult(null);
     setRevivesUsed(0);
     setReviveToken(0);
-    setGameSessionKey((k) => k + 1); // remounts GameScreen -> fresh board
+    setGameSessionKey((k) => k + 1);
   };
 
   const handleHome = () => {
@@ -152,9 +215,19 @@ export const App: React.FC = () => {
     const rewarded = await showRewardedAd();
     if (!rewarded) return false;
 
+    // Clear the global cooldown and restore a life in the active game
+    setGlobalCooldown(0);
     setRevivesUsed((n) => n + 1);
-    setRoundResult(null);            // closes the modal
-    setReviveToken((t) => t + 1);    // tells GameScreen to give a life back
+    setRoundResult(null);
+    setReviveToken((t) => t + 1);
+    return true;
+  };
+
+  // Allows watching an ad from Home / Level Ladder to skip cooldown immediately
+  const handleUnlockCooldownWithAd = async (): Promise<boolean> => {
+    const rewarded = await showRewardedAd();
+    if (!rewarded) return false;
+    setGlobalCooldown(0);
     return true;
   };
 
@@ -168,13 +241,13 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-
       {/* 1. Main View Router */}
       {screen === 'game' ? (
         gameMode === 'untangle' ? (
           <UntangleScreen
             key={`untangle-${activeLevel}-${gameSessionKey}`}
             level={activeLevel}
+            reviveSignal={reviveToken}
             bestScore={progress.untangleStats?.[activeLevel]?.highScore}
             onFinished={handleRoundFinished}
             onOpenPause={() => setIsPauseOpen(true)}
@@ -189,11 +262,14 @@ export const App: React.FC = () => {
             onExit={() => setScreen('home')}
             onFinished={handleRoundFinished}
             onOpenPause={() => setIsPauseOpen(true)}
-            onRestart={() => { setRevivesUsed(0); setReviveToken(0); }}
+            onRestart={() => {
+              if (cooldownSecondsLeft > 0) return;
+              setRevivesUsed(0);
+              setReviveToken(0);
+            }}
           />
         )
-      ) : (
-        /* Home Hub Routing */
+      ) : /* Home Hub Routing */
         subView === 'achievements' ? (
           <AchievementsTab progress={progress} onBack={() => setSubView('none')} />
         ) : subView === 'awards' ? (
@@ -205,13 +281,17 @@ export const App: React.FC = () => {
                 progress={progress}
                 onStartGame={handleStartGame}
                 onGoToDaily={() => setCurrentTab('daily')}
+                cooldownSecondsLeft={cooldownSecondsLeft}
+                onWatchAdRefill={handleUnlockCooldownWithAd}
               />
             )}
             {currentTab === 'daily' && (
               <DailyTab
                 progress={progress}
                 onBack={() => setCurrentTab('main')}
-                onStartDaily={(seed) => handleStartGame('daily', seed % 50 + 1)}
+                onStartLevel={(mode, lvl) => handleStartGame(mode, lvl)}
+                cooldownSecondsLeft={cooldownSecondsLeft}
+                onWatchAdRefill={handleUnlockCooldownWithAd}
               />
             )}
             {currentTab === 'me' && (
@@ -230,8 +310,7 @@ export const App: React.FC = () => {
               }}
             />
           </>
-        )
-      )}
+        )}
 
       {/* 2. Global Overlays & Modals */}
       <PauseModal
@@ -239,6 +318,7 @@ export const App: React.FC = () => {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onResume={() => setIsPauseOpen(false)}
         onRestart={() => {
+          if (cooldownSecondsLeft > 0) return;
           setIsPauseOpen(false);
           setRevivesUsed(0);
           setReviveToken(0);
@@ -256,7 +336,9 @@ export const App: React.FC = () => {
         onReplay={handleReplay}
         onHome={handleHome}
         onWatchAdRevive={handleWatchAdRevive}
+        onCooldownComplete={() => setGlobalCooldown(0)}
         canRevive={revivesUsed < 1}
+        cooldownSeconds={cooldownSecondsLeft}
         isUntangle={gameMode === 'untangle'}
       />
 
