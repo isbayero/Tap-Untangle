@@ -1,4 +1,4 @@
-import { AdMob, RewardAdPluginEvents, AdMobRewardItem } from '@capacitor-community/admob';
+import { AdMob, RewardAdPluginEvents } from '@capacitor-community/admob';
 import { Capacitor } from '@capacitor/core';
 
 export const adService = {
@@ -40,7 +40,7 @@ export const adService = {
             // 1. Listen for the reward event (user watched enough of the ad)
             const rewardListener = await AdMob.addListener(
                 RewardAdPluginEvents.Rewarded,
-                (reward: AdMobRewardItem) => {
+                () => {
                     userEarnedReward = true;
                 }
             );
