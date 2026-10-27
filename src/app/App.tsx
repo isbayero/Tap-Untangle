@@ -6,6 +6,7 @@ import { haptics } from '../services/haptics';
 import { music } from '../services/music';
 import { useAppLifecycle } from '../hooks/useAppLifecycle';
 import { SplashScreen } from '../components/SplashScreen';
+import { adService } from '../services/adService';
 import { SplashScreen as CapSplashScreen } from '@capacitor/splash-screen';
 
 // Game & Modals
@@ -29,10 +30,6 @@ const COOLDOWN_DURATION_MS = 120 * 1000; // 2 minutes wait when out of lives
 
 // TEMP stub: replace with your real rewarded-ad SDK call.
 // Must resolve true ONLY when the player earned the reward.
-const showRewardedAd = async (): Promise<boolean> => {
-  await new Promise((r) => setTimeout(r, 1500));
-  return true;
-};
 
 export const App: React.FC = () => {
   // 1. ALL HOOKS DECLARED FIRST AT THE TOP (NO CONDITIONAL RETURNS ABOVE THIS)
@@ -87,6 +84,8 @@ export const App: React.FC = () => {
   useEffect(() => {
     // Hide native Capacitor splash screen once React is ready
     CapSplashScreen.hide().catch(() => { });
+    // Initialize AdMob and pre-load the first rewarded ad in the background
+    adService.initialize();
   }, []);
 
   // Tick global cooldown every second
@@ -217,8 +216,9 @@ export const App: React.FC = () => {
     setScreen('home');
   };
 
+  // Update your handlers to use the service:
   const handleWatchAdRevive = async (): Promise<boolean> => {
-    const rewarded = await showRewardedAd();
+    const rewarded = await adService.showRewardedAd();
     if (!rewarded) return false;
 
     setGlobalCooldown(0);
@@ -229,7 +229,7 @@ export const App: React.FC = () => {
   };
 
   const handleUnlockCooldownWithAd = async (): Promise<boolean> => {
-    const rewarded = await showRewardedAd();
+    const rewarded = await adService.showRewardedAd();
     if (!rewarded) return false;
     setGlobalCooldown(0);
     return true;
@@ -261,7 +261,7 @@ export const App: React.FC = () => {
             bestScore={progress.untangleStats?.[activeLevel]?.highScore}
             onFinished={handleRoundFinished}
             onOpenPause={() => setIsPauseOpen(true)}
-            onRequestHint={showRewardedAd}
+            onRequestHint={adService.showRewardedAd}
           />
         ) : (
           <GameScreen
