@@ -1,7 +1,7 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-    appId: 'com.lunnovate.arrowescape',
+    appId: 'com.lunnovate.tapuntangle',
     appName: 'Tap Untangle',
     webDir: 'dist',
     server: {

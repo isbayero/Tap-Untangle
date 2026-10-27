@@ -277,7 +277,7 @@ export const UntangleScreen: React.FC<UntangleScreenProps> = ({
 
             const a = anim.current;
             if (a) {
-                const t = Math.min(1, (now - a.t0) / 300);
+                const t = Math.min(1, (now - a.t0) / 500);
                 const e = 1 - Math.pow(1 - t, 3);
                 pts.current[a.i] = {
                     x: a.from.x + (a.to.x - a.from.x) * e,

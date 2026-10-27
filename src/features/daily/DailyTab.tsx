@@ -19,12 +19,12 @@ interface DailyTabProps {
     onWatchAdRefill?: () => Promise<boolean>;
 }
 
-const TOTAL_LEVELS = 300;
+const TOTAL_LEVELS = 500;
 
 // Ladder geometry
 const ROW_H = 92;
 const TOP_PAD = 44;
-const LADDER_W = 300;
+const LADDER_W = 500;
 const AMP = 64;
 const OFFSETS = [0, 1, 0, -1];
 
