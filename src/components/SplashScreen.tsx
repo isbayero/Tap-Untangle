@@ -57,6 +57,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
                     flexDirection: 'column',
                     alignItems: 'center',
                     animation: 'pulseLogo 1.4s ease-out infinite alternate',
+                    willChange: 'transform, opacity',
                 }}
             >
                 {/* App Icon */}
@@ -68,10 +69,11 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
                         overflow: 'hidden',
                         boxShadow: '0 12px 30px rgba(31, 35, 38, 0.15)',
                         marginBottom: '20px',
+                        backgroundColor: '#FFFFFF', // Fallback while loading
                     }}
                 >
                     <img
-                        src="/icon.png"
+                        src="./icon.png" // ✅ Relative path required for mobile Capacitor
                         alt="Logo"
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
@@ -103,6 +105,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
                                 animation: `barWave 1s ease-in-out infinite`,
                                 animationDelay: `${index * 0.15}s`,
                                 transformOrigin: 'center',
+                                willChange: 'transform, opacity',
                             }}
                         />
                     ))}

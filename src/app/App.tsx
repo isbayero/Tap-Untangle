@@ -33,7 +33,7 @@ const COOLDOWN_DURATION_MS = 120 * 1000; // 2 minutes wait when out of lives
 
 export const App: React.FC = () => {
   // 1. ALL HOOKS DECLARED FIRST AT THE TOP (NO CONDITIONAL RETURNS ABOVE THIS)
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(false);
   const [progress, setProgress] = useState<PlayerProgress>(() => {
     const p = loadProgress();
     return {
