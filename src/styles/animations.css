@@ -47,3 +47,145 @@
 .animate-shake {
     animation: shakeError 0.35s ease-in-out;
 }
+
+/* ---------- results celebration ----------
+   Choreography: stars land first (the focal point), text and cards follow so
+   only one thing is moving prominently at a time. Every delay is offset from
+   the same 80ms star beat so the sequence stays in tempo.
+*/
+
+@keyframes resultFade {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* Overshoot + settle, so a star reads as "landing" instead of "fading in". */
+@keyframes resultStarPop {
+    0% {
+        opacity: 0;
+        transform: scale(0.3) rotate(-26deg);
+    }
+
+    62% {
+        opacity: 1;
+        transform: scale(1.14) rotate(5deg);
+    }
+
+    82% {
+        transform: scale(0.97) rotate(-2deg);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+    }
+}
+
+/* Very low-amplitude idle so earned stars keep breathing after they land. */
+@keyframes resultStarBreathe {
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.035);
+    }
+}
+
+/* One-shot halo that fires as each star settles. */
+@keyframes resultStarSpark {
+    0% {
+        opacity: 0;
+        transform: scale(0.35);
+    }
+
+    25% {
+        opacity: 0.8;
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(1.75);
+    }
+}
+
+@keyframes resultRise {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.result-screen {
+    animation: resultFade 0.26s ease-out both;
+}
+
+.result-stars {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.result-star {
+    position: relative;
+    display: inline-flex;
+    opacity: 0;
+    transform-origin: 50% 62%;
+    animation: resultStarPop 0.5s cubic-bezier(0.32, 1.28, 0.5, 1) var(--star-delay, 0ms) both;
+}
+
+.result-star--earned {
+    filter: drop-shadow(0 4px 10px rgba(245, 158, 11, 0.35));
+    animation:
+        resultStarPop 0.5s cubic-bezier(0.32, 1.28, 0.5, 1) var(--star-delay, 0ms) both,
+        resultStarBreathe 3.6s ease-in-out calc(var(--star-delay, 0ms) + 1.2s) infinite;
+}
+
+.result-star__spark {
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    background: radial-gradient(circle,
+            rgba(251, 191, 36, 0.7) 0%,
+            rgba(245, 158, 11, 0.22) 45%,
+            transparent 70%);
+    opacity: 0;
+    transform: scale(0.35);
+    pointer-events: none;
+    animation: resultStarSpark 0.7s cubic-bezier(0.22, 0.61, 0.36, 1) calc(var(--star-delay, 0ms) + 180ms) both;
+}
+
+.result-reveal {
+    opacity: 0;
+    animation: resultRise 0.38s cubic-bezier(0.16, 1, 0.3, 1) var(--reveal-delay, 0ms) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .result-screen,
+    .result-star,
+    .result-star--earned,
+    .result-reveal {
+        animation: none;
+        opacity: 1;
+        transform: none;
+    }
+
+    .result-star__spark {
+        display: none;
+    }
+}

@@ -28,8 +28,17 @@ const LADDER_W = 500;
 const AMP = 64;
 const OFFSETS = [0, 1, 0, -1];
 
+const ladderHeight = TOP_PAD * 2 + (TOTAL_LEVELS - 1) * ROW_H;
+
 const xFor = (i: number) => LADDER_W / 2 + OFFSETS[i % OFFSETS.length] * AMP;
-const yFor = (i: number) => TOP_PAD + i * ROW_H;
+
+/**
+ * The ladder climbs upward. Level 1 sits at the bottom of the scroll area and
+ * later levels stack above it, so new levels are revealed by scrolling up.
+ * `yFor` still returns a plain screen Y, so everything drawn from it (nodes,
+ * stars, connector path) stays upright.
+ */
+const yFor = (i: number) => ladderHeight - TOP_PAD - i * ROW_H;
 
 /** Smooth S-curve through the centers of nodes `from`..`to` */
 const buildPath = (from: number, to: number): string => {
@@ -82,8 +91,12 @@ export const DailyTab: React.FC<DailyTabProps> = ({
         (smooth: boolean) => {
             const el = scrollerRef.current;
             if (!el) return;
+            const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
             el.scrollTo({
-                top: Math.max(0, yFor(currentIdx) - el.clientHeight / 2),
+                top: Math.min(
+                    Math.max(0, yFor(currentIdx) - el.clientHeight / 2),
+                    maxTop
+                ),
                 behavior: smooth ? 'smooth' : 'auto',
             });
         },
@@ -98,7 +111,6 @@ export const DailyTab: React.FC<DailyTabProps> = ({
     const donePath = useMemo(() => buildPath(0, currentIdx), [currentIdx]);
     const restPath = useMemo(() => buildPath(currentIdx, TOTAL_LEVELS - 1), [currentIdx]);
 
-    const ladderHeight = TOP_PAD * 2 + (TOTAL_LEVELS - 1) * ROW_H;
     const progressPct = Math.min(
         100,
         (Math.max(0, currentUnlockedLevel - 1) / TOTAL_LEVELS) * 100

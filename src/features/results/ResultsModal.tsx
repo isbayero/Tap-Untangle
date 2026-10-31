@@ -1,6 +1,49 @@
-import React, { useEffect, useState } from 'react';
-import { Clock } from 'lucide-react';
+import React, { useEffect, useMemo, useId, useState } from 'react';
+import { Clock, Star } from 'lucide-react';
 import { RoundResult } from '../../types/gameTypes';
+import { ConfettiCanvas } from './ConfettiCanvas';
+
+const prefersReducedMotion = (): boolean =>
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+
+/**
+ * Counts a number up so the score lands with the rest of the reveal instead of
+ * appearing fully formed. Jumps straight to the target under reduced motion.
+ */
+const useCountUp = (target: number, delay = 0, duration = 900): number => {
+    const reduced = useMemo(() => prefersReducedMotion(), []);
+    const [value, setValue] = useState(() => (reduced ? target : 0));
+
+    useEffect(() => {
+        if (reduced) {
+            setValue(target);
+            return;
+        }
+
+        let frame = 0;
+        let startedAt = 0;
+
+        const tick = (now: number) => {
+            if (!startedAt) startedAt = now;
+            const progress = Math.min(1, (now - startedAt) / duration);
+            const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+            setValue(Math.round(target * eased));
+            if (progress < 1) frame = requestAnimationFrame(tick);
+        };
+
+        const timer = window.setTimeout(() => {
+            frame = requestAnimationFrame(tick);
+        }, delay);
+
+        return () => {
+            window.clearTimeout(timer);
+            cancelAnimationFrame(frame);
+        };
+    }, [target, delay, duration, reduced]);
+
+    return value;
+};
 
 interface ResultsModalProps {
     result: RoundResult | null;
@@ -32,6 +75,9 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
     const [adLoading, setAdLoading] = useState(false);
     const [adError, setAdError] = useState<string | null>(null);
     const [waitLeft, setWaitLeft] = useState(cooldownSeconds);
+    const displayScore = useCountUp(result?.score ?? 0, 560, 900);
+    const rawStarId = useId();
+    const starGradientId = `result-star-gold${rawStarId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
     // Reset & tick the cooldown timer whenever the modal opens on a failed round
     useEffect(() => {
@@ -92,6 +138,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
 
     return (
         <div
+            className="result-screen"
             style={{
                 position: 'fixed',
                 inset: 0,
@@ -108,8 +155,12 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                 fontFamily: 'var(--font-main, system-ui, -apple-system, sans-serif)',
             }}
         >
+            {result.cleared && (
+                <ConfettiCanvas particleCount={result.stars >= 3 ? 150 : 100} />
+            )}
+
             <div
-                className="animate-pop-in"
+                className={result.cleared ? undefined : 'animate-pop-in'}
                 style={{
                     width: '100%',
                     maxWidth: '350px',
@@ -122,28 +173,50 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                 {/* Star Rating Display (only when cleared) */}
                 {result.cleared && (
                     <div
-                        style={{
-                            display: 'flex',
-                            gap: '6px',
-                            marginBottom: '8px',
-                            fontSize: '3.8rem',
-                        }}
+                        className="result-stars"
+                        role="img"
+                        aria-label={`${result.stars} of 3 stars earned`}
                     >
-                        {Array.from({ length: 3 }, (_, i) => (
-                            <span
-                                key={i}
-                                style={{
-                                    color: i < result.stars ? '#F59E0B' : '#D4D0C5',
-                                    filter:
-                                        i < result.stars
-                                            ? 'drop-shadow(0 2px 4px rgba(245, 158, 11, 0.3))'
-                                            : 'none',
-                                    transform: i === 1 ? 'translateY(-6px)' : 'none',
-                                }}
-                            >
-                                ★
-                            </span>
-                        ))}
+                        {Array.from({ length: 3 }, (_, i) => {
+                            const earned = i < result.stars;
+                            return (
+                                <span
+                                    key={i}
+                                    className={`result-star${earned ? ' result-star--earned' : ''}`}
+                                    style={
+                                        {
+                                            '--star-delay': `${i * 80}ms`,
+                                            marginTop: i === 1 ? '-6px' : 0,
+                                        } as React.CSSProperties
+                                    }
+                                >
+                                    <Star
+                                        size={62}
+                                        strokeWidth={0}
+                                        fill={earned ? `url(#${starGradientId})` : '#D8D3C6'}
+                                        aria-hidden
+                                    />
+                                    {earned && (
+                                        <span className="result-star__spark" aria-hidden />
+                                    )}
+                                </span>
+                            );
+                        })}
+                        <svg width="0" height="0" aria-hidden style={{ position: 'absolute' }}>
+                            <defs>
+                                <linearGradient
+                                    id={starGradientId}
+                                    x1="0"
+                                    y1="0"
+                                    x2="0.35"
+                                    y2="1"
+                                >
+                                    <stop offset="0%" stopColor="#FCD34D" />
+                                    <stop offset="55%" stopColor="#F59E0B" />
+                                    <stop offset="100%" stopColor="#E58409" />
+                                </linearGradient>
+                            </defs>
+                        </svg>
                     </div>
                 )}
 
@@ -180,13 +253,15 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
 
                 {/* Title */}
                 <h1
+                    className={result.cleared ? 'result-reveal' : undefined}
                     style={{
                         fontSize: '1.85rem',
                         fontWeight: 800,
                         color: '#181B20',
                         letterSpacing: '-0.02em',
                         margin: '0 0 6px 0',
-                    }}
+                        '--reveal-delay': '460ms',
+                    } as React.CSSProperties}
                 >
                     {result.cleared
                         ? 'Level Complete!'
@@ -238,32 +313,41 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                 {/* Score Banner */}
                 {result.cleared && (
                     <div
-                        style={{
-                            fontSize: '1.25rem',
-                            fontWeight: 800,
-                            color: '#3B6AD9',
-                            marginBottom: '18px',
-                            letterSpacing: '-0.01em',
-                        }}
+                        className="result-reveal"
+                        style={
+                            {
+                                fontSize: '1.25rem',
+                                fontWeight: 800,
+                                color: '#3B6AD9',
+                                marginBottom: '18px',
+                                letterSpacing: '-0.01em',
+                                fontVariantNumeric: 'tabular-nums',
+                                '--reveal-delay': '560ms',
+                            } as React.CSSProperties
+                        }
                     >
-                        Score: {result.score.toLocaleString()} pts
+                        Score: {displayScore.toLocaleString()} pts
                     </div>
                 )}
 
                 {/* 3-Column Stats Card */}
                 <div
-                    style={{
-                        width: '100%',
-                        backgroundColor: '#FFFFFF',
-                        borderRadius: '16px',
-                        border: '1px solid #E5E2D9',
-                        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.04)',
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1px 1fr 1px 1fr',
-                        alignItems: 'center',
-                        padding: '16px 8px',
-                        marginBottom: '24px',
-                    }}
+                    className="result-reveal"
+                    style={
+                        {
+                            width: '100%',
+                            backgroundColor: '#FFFFFF',
+                            borderRadius: '16px',
+                            border: '1px solid #E5E2D9',
+                            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.04)',
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1px 1fr 1px 1fr',
+                            alignItems: 'center',
+                            padding: '16px 8px',
+                            marginBottom: '24px',
+                            '--reveal-delay': result.cleared ? '660ms' : '0ms',
+                        } as React.CSSProperties
+                    }
                 >
                     {/* Time Column */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -354,78 +438,111 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                     )}
 
                     {result.cleared && (
+                        <div
+                            className="result-reveal"
+                            style={
+                                {
+                                    width: '100%',
+                                    '--reveal-delay': '740ms',
+                                } as React.CSSProperties
+                            }
+                        >
+                            <button
+                                onClick={onNextLevel}
+                                style={{
+                                    width: '100%',
+                                    height: '54px',
+                                    backgroundColor: '#3B6AD9',
+                                    color: '#FFFFFF',
+                                    borderRadius: '14px',
+                                    fontSize: '1.05rem',
+                                    fontWeight: 600,
+                                    border: 'none',
+                                    boxShadow: '0 6px 16px rgba(59, 106, 217, 0.28)',
+                                    cursor: 'pointer',
+                                    transition: 'transform 0.1s ease',
+                                }}
+                                onPointerDown={(e) =>
+                                    (e.currentTarget.style.transform = 'scale(0.98)')
+                                }
+                                onPointerUp={(e) =>
+                                    (e.currentTarget.style.transform = 'scale(1)')
+                                }
+                                onPointerLeave={(e) =>
+                                    (e.currentTarget.style.transform = 'scale(1)')
+                                }
+                            >
+                                Next Level
+                            </button>
+                        </div>
+                    )}
+
+                    <div
+                        className={result.cleared ? 'result-reveal' : undefined}
+                        style={
+                            {
+                                width: '100%',
+                                '--reveal-delay': '770ms',
+                            } as React.CSSProperties
+                        }
+                    >
                         <button
-                            onClick={onNextLevel}
+                            onClick={onReplay}
+                            disabled={isCoolingDown}
                             style={{
                                 width: '100%',
                                 height: '54px',
-                                backgroundColor: '#3B6AD9',
-                                color: '#FFFFFF',
+                                backgroundColor:
+                                    result.cleared || showRevive ? '#FFFFFF' : '#3B6AD9',
+                                color: result.cleared || showRevive ? '#181B20' : '#FFFFFF',
                                 borderRadius: '14px',
                                 fontSize: '1.05rem',
                                 fontWeight: 600,
-                                border: 'none',
-                                boxShadow: '0 6px 16px rgba(59, 106, 217, 0.28)',
-                                cursor: 'pointer',
-                                transition: 'transform 0.1s ease',
+                                border:
+                                    result.cleared || showRevive ? '1px solid #E2DFD7' : 'none',
+                                boxShadow:
+                                    result.cleared || showRevive
+                                        ? '0 2px 6px rgba(0, 0, 0, 0.04)'
+                                        : '0 6px 16px rgba(59, 106, 217, 0.28)',
+                                cursor: isCoolingDown ? 'not-allowed' : 'pointer',
+                                opacity: isCoolingDown ? 0.55 : 1,
+                                transition: 'transform 0.1s ease, opacity 0.2s ease',
                             }}
-                            onPointerDown={(e) =>
-                                (e.currentTarget.style.transform = 'scale(0.98)')
+                            onPointerDown={(e) => {
+                                if (!isCoolingDown)
+                                    e.currentTarget.style.transform = 'scale(0.98)';
+                            }}
+                            onPointerUp={(e) =>
+                                (e.currentTarget.style.transform = 'scale(1)')
                             }
-                            onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                            onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                            onPointerLeave={(e) =>
+                                (e.currentTarget.style.transform = 'scale(1)')
+                            }
                         >
-                            Next Level
+                            {isCoolingDown
+                                ? `Replay Unlocked in ${waitMm}:${waitSs}`
+                                : 'Replay Level'}
                         </button>
-                    )}
+                    </div>
 
                     <button
-                        onClick={onReplay}
-                        disabled={isCoolingDown}
-                        style={{
-                            width: '100%',
-                            height: '54px',
-                            backgroundColor:
-                                result.cleared || showRevive ? '#FFFFFF' : '#3B6AD9',
-                            color: result.cleared || showRevive ? '#181B20' : '#FFFFFF',
-                            borderRadius: '14px',
-                            fontSize: '1.05rem',
-                            fontWeight: 600,
-                            border:
-                                result.cleared || showRevive ? '1px solid #E2DFD7' : 'none',
-                            boxShadow:
-                                result.cleared || showRevive
-                                    ? '0 2px 6px rgba(0, 0, 0, 0.04)'
-                                    : '0 6px 16px rgba(59, 106, 217, 0.28)',
-                            cursor: isCoolingDown ? 'not-allowed' : 'pointer',
-                            opacity: isCoolingDown ? 0.55 : 1,
-                            transition: 'transform 0.1s ease, opacity 0.2s ease',
-                        }}
-                        onPointerDown={(e) => {
-                            if (!isCoolingDown) e.currentTarget.style.transform = 'scale(0.98)';
-                        }}
-                        onPointerUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                        onPointerLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                    >
-                        {isCoolingDown
-                            ? `Replay Unlocked in ${waitMm}:${waitSs}`
-                            : 'Replay Level'}
-                    </button>
-
-                    <button
+                        className={result.cleared ? 'result-reveal' : undefined}
                         onClick={onHome}
-                        style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#484D56',
-                            fontSize: '0.95rem',
-                            fontWeight: 500,
-                            textDecoration: 'underline',
-                            textUnderlineOffset: '3px',
-                            marginTop: '6px',
-                            padding: '6px 12px',
-                            cursor: 'pointer',
-                        }}
+                        style={
+                            {
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#484D56',
+                                fontSize: '0.95rem',
+                                fontWeight: 500,
+                                textDecoration: 'underline',
+                                textUnderlineOffset: '3px',
+                                marginTop: '6px',
+                                padding: '6px 12px',
+                                cursor: 'pointer',
+                                '--reveal-delay': '800ms',
+                            } as React.CSSProperties
+                        }
                     >
                         Main Menu
                     </button>
